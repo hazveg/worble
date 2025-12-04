@@ -82,22 +82,76 @@ def generate_unigram():
 
         unigram[char] = char_probability
 
-        print(f"num_occurences for '{char}': {num_occurences}")
-        print(f"probability for '{char}': {round(char_probability, 2)}")
+        # print(f"num_occurences for '{char}': {num_occurences}")
+        # print(f"probability for '{char}': {round(char_probability, 2)}")
 
-def main():
+def init():
     source_words()
     generate_info_indices()
-
-    """
-    print(list(INFO_INDICES.keys()))
-
-    for idx in INFO_INDICES["x_con_0"]:
-        print(WORDS[idx])
-    """
-
     generate_unigram()
-    # print(list(unigram.keys()))
+
+def determine_array_intersection(a, b):
+    return list(set(a) & set(b))
+
+def P_unigram(char):
+    return unigram[char]
+
+def determine_word_probability(word):
+    probability = 1.0
+    chars = list(word)
+    
+    for char in chars:
+        # we don't need to worry quite yet i think, but moving these numbers 
+        # - either at base or at least here - into "log space" would afford 
+        # us better numerical stability. the resulting probability we get 
+        # from this function ends up in the 10^-[6;9] area. it'd certainly 
+        # be more like people usually handle language models
+        probability *= P_unigram(char)
+
+    return probability
+
+def limit_search_area_with_infos(infos):
+    applicable_word_indices = []
+    for idx, info in enumerate(infos):
+        if idx == 0:
+            applicable_word_indices = info_indices[info]
+            continue
+        
+        curr_info_array = info_indices[info]
+        applicable_word_indices = determine_array_intersection(
+            applicable_word_indices, curr_info_array)
+
+    return applicable_word_indices
+
+def rank_words(word_indices):
+    ranked_words = []
+    for index in word_indices:
+        word = words[index]
+        probability = determine_word_probability(word)
+        ranked_words.append((probability, index))
+
+    # lists don't sort implicitely apparently
+    # unfortunately there is no reverse order sorting
+    ranked_words.sort()
+    return ranked_words
+
+# this function returns the INDEX into the global words list
+def determine_most_likely_next_word(infos):
+    applicable_word_indices = limit_search_area_with_infos(infos)
+    ranked_words = rank_words(applicable_word_indices)
+    # print(ranked_words)
+    # print(words[ranked_words[-1][1]])
+
+    # we only want the most likely word, but maybe we can use the whole list one day?
+    most_likely_word_tuple = ranked_words[-1]
+    most_likely_word_index = most_likely_word_tuple[1]
+    return most_likely_word_index
+
+def main():
+    init()
+    test = [ "p_def_0", "e_con_0" ]
+    word_index = determine_most_likely_next_word(test)
+    print(words[word_index])
 
 if __name__ == "__main__":
     main()
