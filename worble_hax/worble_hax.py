@@ -1,6 +1,8 @@
-# SPDX-FileCopyrightText: 2025 Aaron Jäger <aaron.jaeger@bbzsogr.ch>
+# SPDX-FileCopyrightText: 2025 Aaron Jäger <aaron.jaeger06@gmail.com>
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
+
+import math
 
 SRC = "srcer.txt"
 
@@ -8,14 +10,20 @@ DEFINED_KEYWORD = "def"
 CONTAINED_KEYWORD = "con"
 NOTDEFINED_KEYWORD = "ndef"
 
+SLOT_CONTROLCHAR = '_'
+
 VALID_CHARS = [ 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'ä', 'ö', 'ü' ]
 
 src_str = ""
 words = []
+
 info_model = {}
+
 unigram = {}
-fivegram = {}
-# slotgram = {}
+
+fivegram_index = {}
+fivegram_weights = []
+
 slotgram_index = {}
 slotgram_weights = []
 
@@ -91,19 +99,68 @@ def generate_unigram():
     # *individually*.
     total_num_letters = 5 * total_num_words
 
-    # print(f"total_num_letters: {total_num_letters}")
     for char in VALID_CHARS:
         num_occurences = get_num_occurences_for_char(char)
         char_probability = num_occurences / total_num_letters # unigram is basically relative probability only
 
         unigram[char] = char_probability
 
-        # print(f"num_occurences for '{char}': {num_occurences}")
-        # print(f"probability for '{char}': {round(char_probability, 2)}")
+def define_fivegram_contexts():
+    global fivegram_index
+    global words
+
+    required_context_sequence = {}
+    context_rover = 0
+    for word_idx, word in enumerate(words):
+        for context_len in range(5):
+            context_str = word[0:context_len]
+
+            if not context_str in required_context_sequence:
+                required_context_sequence[context_str] = context_rover
+                context_rover += 1
+
+            context_idx = required_context_sequence[context_str]
+            fivegram_index[(word_idx, context_len)] = context_idx
+
+    return required_context_sequence
+
+def FIVEGRAM_set_context_abs_freqs(context, context_weights):
+    context_freq = 0
+    for char in VALID_CHARS:
+        # for now we'll store the absolute frequency
+        context_weights[char] = 0
+        tmp = context + char
+        # we limit the search area to words that have the context's first 
+        # char defined
+        info = info_keyname(tmp[0], DEFINED_KEYWORD, 0)
+        search_area = limit_search_area_with_info(info)
+
+        for word_idx in search_area:
+            word = words[word_idx]
+            if not word.startswith(tmp):
+                continue
+
+            context_weights[char] += 1
+            context_freq += 1
+
+    return context_freq
+
 
 def generate_fivegram():
-    global fivegram
-    print("TODO: implement fivegram generation")
+    global fivegram_weights
+    global words
+
+    required_context_sequence = define_fivegram_contexts()
+    total_num_contexts = len(required_context_sequence)
+    # init each context as a dict uniquely instead of `total_num_contexts` 
+    # copies of the same blank dictionary
+    fivegram_weights = [{} for i in range(total_num_contexts)]
+    
+    for context, weights_idx in required_context_sequence.items():
+        context_weights = fivegram_weights[weights_idx]
+
+        context_freq = FIVEGRAM_set_context_abs_freqs(context, context_weights)
+        normalize_context_weights(context_weights, context_freq)
 
 # this function returns a new string where the character at idx in str 
 # was replaced with char.
@@ -120,12 +177,10 @@ def define_slotgram_contexts():
     required_context_sequence = {}
     context_rover = 0
     for word_idx, word in enumerate(words):
-        chars = list(word)
-
         for slot_idx in range(5):
             # generate context_str and ensure that there are only unique 
             # entries, initialize empty dictionary for each slotgram.
-            context_str = replace_char_in_str(word, slot_idx, '_')
+            context_str = replace_char_in_str(word, slot_idx, SLOT_CONTROLCHAR)
             
             if not context_str in required_context_sequence:
                 required_context_sequence[context_str] = context_rover
@@ -133,7 +188,6 @@ def define_slotgram_contexts():
         
             context_idx = required_context_sequence[context_str]
             slotgram_index[(word_idx, slot_idx)] = context_idx
-            # slotgram_index[word_idx * 5 + slot_idx] = context_idx
 
     return required_context_sequence
 
@@ -157,7 +211,6 @@ def set_context_abs_freqs(context, slot_idx, context_weights):
 
         for word_idx in search_area:
             word = words[word_idx]
-            # print(f"processing \"{word}\" for context \"{context}\"")
             if word != tmp:
                 continue
 
@@ -166,13 +219,10 @@ def set_context_abs_freqs(context, slot_idx, context_weights):
 
     return context_freq
 
-# normalize char <-> context weights
-def normalize_context_weights(context_weights, context_freq, total_num_contexts):
-    # print(f"before: {slotgram[context_str]}")
+# normalize char weights, not in log space; multiplication still needed!
+def normalize_context_weights(context_weights, context_freq):
     for char in VALID_CHARS:
-        context_weights[char] /= context_freq
-        context_weights[char] /= total_num_contexts
-    # print(f"after: {slotgram[context_str]}")
+        context_weights[char] = context_weights[char] / context_freq
 
 def generate_slotgram():
     global slotgram_weights
@@ -185,43 +235,20 @@ def generate_slotgram():
     slotgram_weights = [{} for i in range(total_num_contexts)]
 
     for context, weights_idx in required_context_sequence.items():
-        slot_idx = context.index('_')
+        slot_idx = context.index(SLOT_CONTROLCHAR)
         context_weights = slotgram_weights[weights_idx]
 
         context_freq = set_context_abs_freqs(context, slot_idx, context_weights)
-        normalize_context_weights(context_weights, context_freq, total_num_contexts)
-
-def validate_unigram_weights():
-    global unigram
-
-    total = 0.0
-    for char in unigram.keys():
-        total += unigram[char]
-
-    print(total)
-
-def validate_fivegram_weights():
-    global fivegram
-    print("TODO: implement fivegram")
-
-def validate_slotgram_weights():
-    global slotgram
-
-    total = 0.0
-    for context in slotgram_weights:
-        for char in context.keys():
-            total += context[char]
-
-    print(total)
+        normalize_context_weights(context_weights, context_freq)
 
 def init():
     source_words()
+
     generate_info_model()
+
     generate_unigram()
-    # validate_unigram_weights()
-    # generate_fivegram()
+    generate_fivegram()
     generate_slotgram()
-    # validate_slotgram_weights()
 
 def determine_array_intersection(a, b):
     return list(set(a) & set(b))
@@ -230,20 +257,21 @@ def P_unigram(char):
     global unigram
     return unigram[char]
 
-def P_fivegram(char):
-    global fivegram
-    print("TODO: implement fivegram")
-    return 0.0
+def P_fivegram(word_idx, context_len):
+    global fivegram_index
+    global fivegram_weights
+
+    char = words[word_idx][context_len]
+    context_weights_idx = fivegram_index[(word_idx, context_len)]
+    return fivegram_weights[context_weights_idx][char]
 
 def P_slotgram(word_idx, slot_idx):
     global slotgram_index
     global slotgram_weights
     
     char = words[word_idx][slot_idx]
-    context_weight_idx = slotgram_index[(word_idx, slot_idx)]
-    return slotgram_weights[context_weight_idx][char]
-    # context = replace_char_in_str(word, slot_idx, '_')
-    # return slotgram[context][char]
+    context_weights_idx = slotgram_index[(word_idx, slot_idx)]
+    return slotgram_weights[context_weights_idx][char]
 
 def determine_word_probability(word_idx):
     probability = 1.0
@@ -253,9 +281,10 @@ def determine_word_probability(word_idx):
         # we don't need to worry quite yet i think, but moving these numbers 
         # - either at base or at least here - into "log space" would afford 
         # us better numerical stability. the resulting probability we get 
-        # from this function ends up in the 10^-[6;9] area. it'd certainly 
-        # be more like people usually handle language models
+        # from this function ends up in the 10^-[6;24] area. it'd certainly 
+        # be more like people usually handle language models.
         # probability *= P_unigram(char)
+        # probability *= P_fivegram(word_idx, char_idx)
         probability *= P_slotgram(word_idx, char_idx)
 
     return probability
@@ -289,15 +318,16 @@ def rank_words(word_indices):
     # lists don't sort implicitely apparently
     # unfortunately there is no reverse order sorting
     ranked_words.sort()
-    print(ranked_words)
+
+    for rank in ranked_words:
+        print(f"{rank}: {rank[1]} = { words[rank[1]] }")
+
     return ranked_words
 
 # this function returns the INDEX into the global words list
 def determine_most_likely_next_word(infos):
     applicable_word_indices = limit_search_area_with_infos(infos)
     ranked_words = rank_words(applicable_word_indices)
-    # print(ranked_words)
-    # print(words[ranked_words[-1][1]])
 
     # we only want the most likely word, but maybe we can use the whole list one day?
     most_likely_word_tuple = ranked_words[-1]
