@@ -12,10 +12,12 @@ VALID_CHARS = [ 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
 
 src_str = ""
 words = []
-info_indices = {}
+info_model = {}
 unigram = {}
 fivegram = {}
-slotgram = {}
+# slotgram = {}
+slotgram_index = {}
+slotgram_weights = []
 
 def source_words():
     # goofy ahh language
@@ -31,7 +33,7 @@ def info_keyname(char, keyw, idx):
     return f"{char}_{keyw}_{idx}"
 
 def derive_info(idx, word):
-    global info_indices
+    global info_model
     nth_occurence = {
         'a': 0, 'b': 0, 'c': 0, 'd': 0, 'e': 0,
         'f': 0, 'g': 0, 'h': 0, 'i': 0, 'j': 0,
@@ -47,13 +49,13 @@ def derive_info(idx, word):
         con_key = info_keyname(char, CONTAINED_KEYWORD, nth_occurence[char])
         nth_occurence[char] += 1
 
-        if not def_key in info_indices:
-            info_indices[def_key] = []
-        if not con_key in info_indices:
-            info_indices[con_key] = []
+        if not def_key in info_model:
+            info_model[def_key] = []
+        if not con_key in info_model:
+            info_model[con_key] = []
 
-        info_indices[def_key].append(idx)
-        info_indices[con_key].append(idx)
+        info_model[def_key].append(idx)
+        info_model[con_key].append(idx)
 
     for char in nth_occurence.keys():
         if nth_occurence[char] != 0:
@@ -61,12 +63,12 @@ def derive_info(idx, word):
         
         ndef_key = info_keyname(char, NOTDEFINED_KEYWORD, 0)
 
-        if not ndef_key in info_indices:
-            info_indices[ndef_key] = []
+        if not ndef_key in info_model:
+            info_model[ndef_key] = []
 
-        info_indices[ndef_key].append(idx)
+        info_model[ndef_key].append(idx)
 
-def generate_info_indices():
+def generate_info_model():
     for idx, word in enumerate(words):
         derive_info(idx, word)
 
@@ -111,50 +113,83 @@ def replace_char_in_str(str, idx, char):
     res = "".join(tmp)
     return res
 
-# not a fan of using strings as the keys, but with dictionaries this is the 
-# only way, with proper structs i'd create a tree structure where two noes 
-# share a child node.
 def define_slotgram_contexts():
-    global slotgram
+    global slotgram_index
     global words
 
-    for word in words:
+    required_context_sequence = {}
+    context_rover = 0
+    for word_idx, word in enumerate(words):
         chars = list(word)
 
         for slot_idx in range(5):
             # generate context_str and ensure that there are only unique 
             # entries, initialize empty dictionary for each slotgram.
             context_str = replace_char_in_str(word, slot_idx, '_')
-            slotgram[context_str] = {}
+            
+            if not context_str in required_context_sequence:
+                required_context_sequence[context_str] = context_rover
+                context_rover += 1
+        
+            context_idx = required_context_sequence[context_str]
+            slotgram_index[(word_idx, slot_idx)] = context_idx
+            # slotgram_index[word_idx * 5 + slot_idx] = context_idx
+
+    return required_context_sequence
+
+def limit_search_area_with_info(info):
+    global info_model
+    if not info in info_model:
+        return []
+
+    return info_model[info]
+
+def set_context_abs_freqs(context, slot_idx, context_weights):
+    context_freq = 0
+    for char in VALID_CHARS:
+        # for now we'll store the absolute freq
+        context_weights[char] = 0
+        tmp = replace_char_in_str(context, slot_idx, char)
+        # we limit the search area to words that have the context's first 
+        # char defined
+        info = info_keyname(tmp[0], DEFINED_KEYWORD, 0)
+        search_area = limit_search_area_with_info(info)
+
+        for word_idx in search_area:
+            word = words[word_idx]
+            # print(f"processing \"{word}\" for context \"{context}\"")
+            if word != tmp:
+                continue
+
+            context_weights[char] += 1
+            context_freq += 1
+
+    return context_freq
+
+# normalize char <-> context weights
+def normalize_context_weights(context_weights, context_freq, total_num_contexts):
+    # print(f"before: {slotgram[context_str]}")
+    for char in VALID_CHARS:
+        context_weights[char] /= context_freq
+        context_weights[char] /= total_num_contexts
+    # print(f"after: {slotgram[context_str]}")
 
 def generate_slotgram():
-    global slotgram
+    global slotgram_weights
     global words
     
-    define_slotgram_contexts()
+    required_context_sequence = define_slotgram_contexts()
+    total_num_contexts = len(required_context_sequence)
+    # init each context as a dict uniquely instead of `total_num_contexts` 
+    # copies of the same blank dictionary
+    slotgram_weights = [{} for i in range(total_num_contexts)]
 
-    total_num_contexts = len(slotgram)
-    for context in slotgram.keys():
+    for context, weights_idx in required_context_sequence.items():
         slot_idx = context.index('_')
-        context_freq = 0
-        for char in VALID_CHARS:
-            # for now unigram will store absolute freq of char in context
-            slotgram[context][char] = 0
-            tmp = replace_char_in_str(context, slot_idx, char)
+        context_weights = slotgram_weights[weights_idx]
 
-            for word in words:
-                if word != tmp:
-                    continue
-
-                slotgram[context][char] += 1
-                context_freq += 1
-        
-        # normalize char <-> context weights
-        # print(f"before: {slotgram[context_str]}")
-        for char in VALID_CHARS:
-            slotgram[context][char] /= context_freq
-            slotgram[context][char] /= total_num_contexts
-        # print(f"after: {slotgram[context_str]}")
+        context_freq = set_context_abs_freqs(context, slot_idx, context_weights)
+        normalize_context_weights(context_weights, context_freq, total_num_contexts)
 
 def validate_unigram_weights():
     global unigram
@@ -173,15 +208,15 @@ def validate_slotgram_weights():
     global slotgram
 
     total = 0.0
-    for context in slotgram.keys():
-        for char in slotgram[context].keys():
-            total += slotgram[context][char]
+    for context in slotgram_weights:
+        for char in context.keys():
+            total += context[char]
 
     print(total)
 
 def init():
     source_words()
-    generate_info_indices()
+    generate_info_model()
     generate_unigram()
     # validate_unigram_weights()
     # generate_fivegram()
@@ -200,15 +235,19 @@ def P_fivegram(char):
     print("TODO: implement fivegram")
     return 0.0
 
-def P_slotgram(word, slot_idx):
-    global slotgram
-    char = word[slot_idx]
-    context = replace_char_in_str(word, slot_idx, '_')
-    return slotgram[context][char]
+def P_slotgram(word_idx, slot_idx):
+    global slotgram_index
+    global slotgram_weights
+    
+    char = words[word_idx][slot_idx]
+    context_weight_idx = slotgram_index[(word_idx, slot_idx)]
+    return slotgram_weights[context_weight_idx][char]
+    # context = replace_char_in_str(word, slot_idx, '_')
+    # return slotgram[context][char]
 
-def determine_word_probability(word):
+def determine_word_probability(word_idx):
     probability = 1.0
-    chars = list(word)
+    chars = list(words[word_idx])
     
     for char_idx, char in enumerate(chars):
         # we don't need to worry quite yet i think, but moving these numbers 
@@ -217,7 +256,7 @@ def determine_word_probability(word):
         # from this function ends up in the 10^-[6;9] area. it'd certainly 
         # be more like people usually handle language models
         # probability *= P_unigram(char)
-        probability *= P_slotgram(word, char_idx)
+        probability *= P_slotgram(word_idx, char_idx)
 
     return probability
 
@@ -232,10 +271,10 @@ def limit_search_area_with_infos(infos):
 
     for idx, info in enumerate(infos):
         if idx == 0:
-            applicable_word_indices = info_indices[info]
+            applicable_word_indices = info_model[info]
             continue
         
-        curr_info_array = info_indices[info]
+        curr_info_array = info_model[info]
         applicable_word_indices = determine_array_intersection(
             applicable_word_indices, curr_info_array)
 
@@ -243,14 +282,14 @@ def limit_search_area_with_infos(infos):
 
 def rank_words(word_indices):
     ranked_words = []
-    for index in word_indices:
-        word = words[index]
-        probability = determine_word_probability(word)
-        ranked_words.append((probability, index))
+    for word_idx in word_indices:
+        probability = determine_word_probability(word_idx)
+        ranked_words.append((probability, word_idx))
 
     # lists don't sort implicitely apparently
     # unfortunately there is no reverse order sorting
     ranked_words.sort()
+    print(ranked_words)
     return ranked_words
 
 # this function returns the INDEX into the global words list
@@ -268,6 +307,7 @@ def determine_most_likely_next_word(infos):
 def main():
     init()
     test = [ "e_ndef_0", "d_def_0" ]
+    # test = []
     word_index = determine_most_likely_next_word(test)
     print(words[word_index])
 
