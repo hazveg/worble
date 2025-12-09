@@ -228,7 +228,6 @@ def init():
 
 def main():
     init()
-    print(info_model.keys())
     # test = [ "e_ndef_0", "d_def_0" ]
     test = []
     word_index = determine_most_likely_next_word(test)

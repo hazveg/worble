@@ -50,28 +50,29 @@ def derive_info(idx, word):
 
     chars = list(word)
     for char_idx, char in enumerate(chars):
-        def_key = info_keyname(char, DEFINED_KEYWORD, char_idx)
-        con_key = info_keyname(char, CONTAINED_KEYWORD, nth_occurence[char])
         nth_occurence[char] += 1
 
+        # char at char_idx defined in word at idx
+        def_key = info_keyname(char, DEFINED_KEYWORD, char_idx)
         if not def_key in info_model:
             info_model[def_key] = []
+        info_model[def_key].append(idx)
+
+        # char contained in word at idx for nth_occurence[char] time
+        con_key = info_keyname(char, CONTAINED_KEYWORD, nth_occurence[char])
         if not con_key in info_model:
             info_model[con_key] = []
-
-        info_model[def_key].append(idx)
         info_model[con_key].append(idx)
-
-    for char in nth_occurence.keys():
-        if nth_occurence[char] != 0:
-            continue
         
-        ndef_key = info_keyname(char, NOTDEFINED_KEYWORD, 0)
+        # all other valid chars except char not defined at char_idx in word at idx
+        for c in VALID_CHARS:
+            if char == c:
+                continue
 
-        if not ndef_key in info_model:
-            info_model[ndef_key] = []
-
-        info_model[ndef_key].append(idx)
+            ndef_key = info_keyname(c, NOTDEFINED_KEYWORD, char_idx)
+            if not ndef_key in info_model:
+                info_model[ndef_key] = []
+            info_model[ndef_key].append(idx)
 
 def get_num_occurences_for_char(char):
     num_occurences = 0
@@ -150,7 +151,7 @@ def set_trigram_context_abs_freqs(context, context_weights):
         tmp = context + char
         # we limit the search area to words that have the context's first 
         # char defined
-        info = info_keyname(tmp[0], CONTAINED_KEYWORD, 0)
+        info = info_keyname(tmp[0], CONTAINED_KEYWORD, 1)
         search_area = limit_search_area_with_info(info_model, info)
 
         for word_idx in search_area:

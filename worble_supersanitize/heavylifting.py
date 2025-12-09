@@ -18,6 +18,10 @@ def main():
         columns = line.split()
         if len(columns) == 0:
             continue
+        
+        # skip comments
+        if columns[0] == '#':
+            continue
 
         word = columns[0]
         word = word.replace('ß', "ss")
