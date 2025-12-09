@@ -4,4 +4,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-python3 dep/heavylifting.py > src.txt
+INPUTFILE="src.txt"
+OUTPUTFILE="srcester.txt"
+
+sort $INPUTFILE | uniq > $OUTPUTFILE

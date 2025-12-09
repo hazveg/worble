@@ -4,8 +4,8 @@
 
 import re
 
-SRC = "wortliste.txt"
-ENCODING = "utf-8"
+SRC = "derewo-v-ww-bll-320000g-2012-12-31-1.0.txt"
+ENCODING = "latin-1"
 
 def contains_invalid(word):
     return bool(re.search(r'[^a-zäöü]', word))
@@ -14,16 +14,21 @@ def main():
     file = open(SRC, "r", encoding=ENCODING)
     content = file.read()
 
-    for line in content.split():
-        line = line.replace('ß', "ss")
-        line = line.lower()
-
-        if contains_invalid(line):
-            continue
-        if len(line) != 5:
+    for line in content.split('\n'):
+        columns = line.split()
+        if len(columns) == 0:
             continue
 
-        print(line)
+        word = columns[0]
+        word = word.replace('ß', "ss")
+        word = word.lower()
+
+        if contains_invalid(word):
+            continue
+        if len(word) != 5:
+            continue
+
+        print(word)
 
     file.close()
 
